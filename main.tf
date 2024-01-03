@@ -3,6 +3,12 @@ provider "aws" {
   region = "us-east-1"
 }
 
+variable "subnet" {
+  description = "subnet object"
+  #default     = "default value"
+  #type = string
+}
+
 # 1. create vpc
 # Create a VPC
 resource "aws_vpc" "prod-vpc" {
@@ -28,8 +34,8 @@ resource "aws_route_table" "prod-route-table" {
   }
 
   route {
-    ipv6_cidr_block        = "::/0"
-    egress_only_gateway_id = aws_internet_gateway.gw.id
+    ipv6_cidr_block = "::/0"
+    gateway_id      = aws_internet_gateway.gw.id
   }
 
   tags = {
@@ -39,18 +45,27 @@ resource "aws_route_table" "prod-route-table" {
 
 
 # 4. create a subnet
-resource "aws_subnet" "prod-subnet" {
+resource "aws_subnet" "subnet-1" {
   vpc_id            = aws_vpc.prod-vpc.id
-  cidr_block        = "10.0.1.0/24"
+  cidr_block        = var.subnet[0].prefix
   availability_zone = "us-east-1b" # 可用區域
   tags = {
-    Name = "production"
+    Name = var.subnet[0].tagname
+  }
+}
+
+resource "aws_subnet" "subnet-2" {
+  vpc_id            = aws_vpc.prod-vpc.id
+  cidr_block        = var.subnet[1].prefix
+  availability_zone = "us-east-1b" # 可用區域
+  tags = {
+    Name = var.subnet[1].tagname
   }
 }
 
 # 5. associate subnet with route table
 resource "aws_route_table_association" "a" {
-  subnet_id      = aws_vpc.prod-vpc.id
+  subnet_id      = aws_subnet.subnet-1.id
   route_table_id = aws_route_table.prod-route-table.id
 }
 
@@ -93,13 +108,13 @@ resource "aws_security_group" "allow_web" {
   }
 
   tags = {
-    Name = "allow_tls"
+    Name = "allow_web"
   }
 }
 
 # 7. create a network interface with an ip in the subnet that was created in step4
 resource "aws_network_interface" "web-server-nic" {
-  subnet_id       = aws_subnet.prod-subnet.id
+  subnet_id       = aws_subnet.subnet-1.id
   private_ips     = ["10.0.1.50"] # within subnet cidr_block
   security_groups = [aws_security_group.allow_web.id]
 }
@@ -117,15 +132,27 @@ resource "aws_eip" "one" {
 
 # 9. create Ubuntu server and install/enable apache2
 resource "aws_instance" "web-server-aws_instance" {
-  ami               = ""
+  ami               = "ami-0c7217cdde317cfec"
   instance_type     = "t2.micro"
   availability_zone = "us-east-1b"
-  key_name          = "main-key"
+  key_name          = "terraform"
 
   network_interface {
     device_index         = 0
     network_interface_id = aws_network_interface.web-server-nic.id
   }
 
-  # user_data = <<-EOF
+  user_data = file("userdata.sh")
+
+  tags = {
+    Name = "web-server"
+  }
+}
+
+output "server_private_ip" {
+  value = aws_instance.web-server-aws_instance.private_ip
+}
+
+output "server_public_ip" {
+  value = aws_eip.one.public_ip
 }
